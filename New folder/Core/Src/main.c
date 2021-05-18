@@ -49,7 +49,7 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 uint64_t PWMOut1 = 0;
 uint64_t PWMOut2 = 0;
-uint64_t Vel = 0;
+float Vel = 0;
 
 uint16_t first = 0;
 
@@ -57,16 +57,20 @@ uint64_t _micros = 0;
 float setVel = 0;
 float EncoderRpm = 0;
 float EncoderVel = 0;
-float lastEncoderRpm = 0;
-float SecondlastEncoderRpm = 0;
-uint64_t Timestamp_Encoder = 0;
 
-float Kp = 1;
-float Ki = 2;
-float Kd = 0.5;
-float saveKp = 1;
-float saveKi = 2;
-float saveKd = 0.5;
+float lastEncoderRpm = 0;
+float Avg_Vel = 0;
+uint64_t Timestamp_Encoder = 0;
+uint64_t Timestamp_Average = 0;
+
+float Kp = 300.0;
+float Ki = 1.8;
+float Kd = 160.0;
+float saveKp = 300.0;
+float saveKi = 1.8;
+float saveKd = 160.0;
+float K1 = 461.8;//Kp + Ki + Kd;
+float K2 = 620;//Kp + (2*Kd);
 
 float VelChange = 0;
 float VelError = 0;
@@ -150,29 +154,40 @@ int main(void)
 //		  EncoderVel = EncoderVelocity_Update();
 //	  }*/
 	  //Add LPF?
+	  //สูงสุดสามารถวัดได้ 1535 pulse ใน 1000 us
+	  //ดังนั้นจากสมการ (EncoderPositionDiff * 1000000) / (float) EncoderTimeDiff
+	  //1535000 pulse/second * 60 / 3072 = 29980 Rpm
+	  //ต่ำสุดระบบสามารถวัดได้ 1 pulse
+	  //ใน 1000 us
+	  //ดังนั้นจากสมการ (EncoderPositionDiff * 1000000) / (float) EncoderTimeDiff
+	  //1000 pulse/second * 60 / 3072 = 19.53125 Rpm
 	  if (micros() - Timestamp_Encoder >= 1000) //us
 	  {
 		  Timestamp_Encoder = micros();
-		  EncoderVel = ((EncoderVel * 99) + EncoderVelocity_Update())/100.0;
+		  EncoderVel = ((EncoderVel * 199) + EncoderVelocity_Update())/200.0;
 		  EncoderRpm = (EncoderVel * 60.0)/3072.0;
-		  if(setVel > 25.0)
+		  if(setVel > 15.0)
 		  {
-			  setVel = 25.0;
+			  setVel = 15.0;
 		  }
-		  else if(setVel < -25.0)
+		  else if(setVel < -15.0)
 		  {
-			  setVel = -25.0;
+			  setVel = -15.0;
 		  }
-		  if(setVel >= 0.0)
-		  {
-			  VelError = setVel - EncoderRpm;
-		  }
-		  else if(setVel < 0.0)
-		  {
-			  VelError = EncoderRpm - setVel;
-		  }
-		  VelChange = ((Kp+Ki+Kd)*VelError) - ((Kp + (2*Kd))*lastError) + (Kd*SecondlastError);
+		  VelError = setVel - EncoderRpm;
+		  VelChange = (K1*VelError) - (K2*lastError) + (Kd*SecondlastError);
 		  Vel += VelChange;
+
+
+		  if(Vel > 10000.0)
+		  {
+			  Vel = 10000.0;
+		  }
+		  if(Vel < -10000.0)
+		  {
+			  Vel = -10000.0;
+		  }
+
 
 		  if(Vel >= 0)
 		  {
@@ -185,35 +200,33 @@ int main(void)
 			  PWMOut2 = -Vel;
 		  }
 
-		  /*if(setVel >= 0.0)
-		  {
-			  PWMOut1 += VelChange;
-			  PWMOut2 = 0;
-		  }
-		  else if(setVel < 0.0)
- 		  {
-			  PWMOut2 += VelChange;
-			  PWMOut1 = 0;
-		  }*/
-
 		  SecondlastError = lastError;
 		  lastError = VelError;
-		  lastEncoderRpm = EncoderRpm;
-		  if(Kp != saveKp || Ki != saveKi || Kd != saveKd)
+
+		  /*if(Kp != saveKp || Ki != saveKi || Kd != saveKd)
 		  {
-			  VelError = 0;
+			  Vel = 0;
 			  SecondlastError = 0;
 			  lastError = 0;
-			  lastEncoderRpm = 0;
-		  }
 
-		  saveKd = Kd;
-		  saveKp = Kp;
-		  saveKi = Ki;
+			  K1 = Kp + Ki + Kd;
+			  K2 = Kp + (2*Kd);
+
+			  saveKd = Kd;
+			  saveKp = Kp;
+			  saveKi = Ki;
+
+		  }*/
 
 		  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, PWMOut1);
 		  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, PWMOut2);
 	  }
+//	  if (micros() - Timestamp_Average >= 10000)
+//	  {
+//		  Timestamp_Average = micros();
+//		  Avg_Vel = ((lastEncoderRpm * 999) + EncoderRpm)/1000.0;
+//		  lastEncoderRpm = EncoderRpm;
+//	  }
   }
   /* USER CODE END 3 */
 }
@@ -291,11 +304,11 @@ static void MX_TIM1_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 15;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 0;
+  sConfig.IC2Filter = 4;
   if (HAL_TIM_Encoder_Init(&htim1, &sConfig) != HAL_OK)
   {
     Error_Handler();
