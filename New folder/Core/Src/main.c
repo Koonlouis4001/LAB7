@@ -42,13 +42,41 @@
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+uint64_t PWMOut1 = 0;
+uint64_t PWMOut2 = 0;
+uint64_t Vel = 0;
+
+uint16_t first = 0;
+
 uint64_t _micros = 0;
+float setVel = 0;
+float EncoderRpm = 0;
 float EncoderVel = 0;
+float lastEncoderRpm = 0;
+float SecondlastEncoderRpm = 0;
 uint64_t Timestamp_Encoder = 0;
+
+float Kp = 1;
+float Ki = 2;
+float Kd = 0.5;
+float saveKp = 1;
+float saveKi = 2;
+float saveKd = 0.5;
+
+float VelChange = 0;
+float VelError = 0;
+
+//float sumError = 0;
+//float diffError = 0;
+
+float lastError = 0;
+float SecondlastError = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,6 +85,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 uint64_t micros();
 float EncoderVelocity_Update();
@@ -98,9 +127,13 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_ALL);
+  HAL_TIM_Base_Start(&htim4);
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -111,16 +144,75 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  //RAW Read
-	  /*if (micros() - Timestamp_Encoder >= 1000) //us
-	  {
-		  Timestamp_Encoder = micros();
-		  EncoderVel = EncoderVelocity_Update();
-	  }*/
+//	  /*if (micros() - Timestamp_Encoder >= 1000) //us
+//	  {
+//		  Timestamp_Encoder = micros();
+//		  EncoderVel = EncoderVelocity_Update();
+//	  }*/
 	  //Add LPF?
-	  if (micros() - Timestamp_Encoder >= 1000)
+	  if (micros() - Timestamp_Encoder >= 1000) //us
 	  {
 		  Timestamp_Encoder = micros();
-		  EncoderVel = (EncoderVel * 99 + EncoderVelocity_Update()) / 100.0;
+		  EncoderVel = ((EncoderVel * 99) + EncoderVelocity_Update())/100.0;
+		  EncoderRpm = (EncoderVel * 60.0)/3072.0;
+		  if(setVel > 25.0)
+		  {
+			  setVel = 25.0;
+		  }
+		  else if(setVel < -25.0)
+		  {
+			  setVel = -25.0;
+		  }
+		  if(setVel >= 0.0)
+		  {
+			  VelError = setVel - EncoderRpm;
+		  }
+		  else if(setVel < 0.0)
+		  {
+			  VelError = EncoderRpm - setVel;
+		  }
+		  VelChange = ((Kp+Ki+Kd)*VelError) - ((Kp + (2*Kd))*lastError) + (Kd*SecondlastError);
+		  Vel += VelChange;
+
+		  if(Vel >= 0)
+		  {
+			  PWMOut1 = Vel;
+			  PWMOut2 = 0;
+		  }
+		  if(Vel < 0)
+		  {
+			  PWMOut1 = 0;
+			  PWMOut2 = -Vel;
+		  }
+
+		  /*if(setVel >= 0.0)
+		  {
+			  PWMOut1 += VelChange;
+			  PWMOut2 = 0;
+		  }
+		  else if(setVel < 0.0)
+ 		  {
+			  PWMOut2 += VelChange;
+			  PWMOut1 = 0;
+		  }*/
+
+		  SecondlastError = lastError;
+		  lastError = VelError;
+		  lastEncoderRpm = EncoderRpm;
+		  if(Kp != saveKp || Ki != saveKi || Kd != saveKd)
+		  {
+			  VelError = 0;
+			  SecondlastError = 0;
+			  lastError = 0;
+			  lastEncoderRpm = 0;
+		  }
+
+		  saveKd = Kd;
+		  saveKp = Kp;
+		  saveKi = Ki;
+
+		  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, PWMOut1);
+		  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, PWMOut2);
 	  }
   }
   /* USER CODE END 3 */
@@ -266,6 +358,69 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 0;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 10000;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 5000;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+  HAL_TIM_MspPostInit(&htim4);
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -371,16 +526,17 @@ float EncoderVelocity_Update()
 	return (EncoderPositionDiff * 1000000) / (float) EncoderTimeDiff;
 
 }
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if(htim == &htim2)
+	if (htim == &htim2)
 	{
 		_micros += 4294967295;
 	}
 }
 uint64_t micros()
 {
-	return (_micros + htim2.Instance->CNT);//counter of Timer 2
+	return _micros + htim2.Instance->CNT;
 }
 /* USER CODE END 4 */
 
