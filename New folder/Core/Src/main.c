@@ -166,13 +166,13 @@ int main(void)
 		  Timestamp_Encoder = micros();
 		  EncoderVel = ((EncoderVel * 199) + EncoderVelocity_Update())/200.0;
 		  EncoderRpm = (EncoderVel * 60.0)/3072.0;
-		  if(setVel > 15.0)
+		  if(setVel > 35.0)
 		  {
-			  setVel = 15.0;
+			  setVel = 35.0;
 		  }
-		  else if(setVel < -15.0)
+		  else if(setVel < -35.0)
 		  {
-			  setVel = -15.0;
+			  setVel = -35.0;
 		  }
 		  VelError = setVel - EncoderRpm;
 		  VelChange = (K1*VelError) - (K2*lastError) + (Kd*SecondlastError);
